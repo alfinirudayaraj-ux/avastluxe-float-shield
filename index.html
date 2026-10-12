@@ -279,14 +279,38 @@ function paintFloat(o){
 function timeout(p,ms){return Promise.race([p,new Promise((_,rj)=>setTimeout(()=>rj(new Error("timeout")),ms))]);}
 async function dohGoogle(host){try{const r=await timeout(fetch("https://dns.google/resolve?name="+encodeURIComponent(host)+"&type=A").then(r=>r.json()),6000);if(r.Status===0&&r.Answer&&r.Answer.length)return{ok:true,n:r.Answer.length};if(r.Status===3)return{ok:false,nx:true};return{ok:false,n:0};}catch{return{ok:null};}}
 async function rdap(host){try{const r=await timeout(fetch("https://rdap.org/domain/"+encodeURIComponent(host)).then(r=>{if(r.status===404)throw new Error("nx");return r.json();}),7000);let created=null;for(const e of (r.events||[])){if(e.eventAction==="registration"){created=e.eventDate;}}let age=null;if(created){age=(Date.now()-new Date(created).getTime())/31557600000;}let org="";try{org=(r.registrant&&JSON.stringify(r.registrant).slice(0,120))||"";}catch{}return{ok:true,age,org};}catch(e){return{ok:e.message==="nx"?false:null};}}
-async function reach(url){const t0=performance.now();try{await timeout(fetch("https://api.allorigins.win/get?url="+encodeURIComponent(url)),8000);return{ok:true,ms:Math.round(performance.now()-t0)};}catch{try{await timeout(fetch(url,{mode:"no-cors"}),6000);return{ok:true,ms:Math.round(performance.now()-t0)};}catch(e){return{ok:false};}}}
-async function deepCheck(raw){
+// RDAP only knows registrable domains — "www.google.com" is a SUBDOMAIN and 404s.
+function registrableDomain(host){
+  if(!host||/^\d{1,3}(\.\d{1,3}){3}$/.test(host))return host;
+  const p=host.split(".");if(p.length<=2)return host;
+  const MULTI=["co.in","org.in","net.in","com.in","ac.in","edu.in","gov.in","co.uk","org.uk","ac.uk","com.au","net.au","org.au","co.jp","ne.jp","or.jp","com.br","com.mx","co.za","com.sg","com.my","co.id","com.ph","com.vn","co.th","com.tw","co.kr","com.cn","com.hk","co.nz"];
+  const l2=p.slice(-2).join(".");
+  if(MULTI.indexOf(l2)>=0&&p.length>=3)return p.slice(-3).join(".");
+  return l2;
+}
+async function reach(url){
+  const t0=performance.now(),ms=()=>Math.round(performance.now()-t0);
+  // fast direct probe first (opaque response = server answered)
+  try{await timeout(fetch(url,{mode:"no-cors"}),3500);return{ok:true,ms:ms()};}catch{}
+  try{const r=await timeout(fetch("https://api.allorigins.win/get?url="+encodeURIComponent(url)),5000);const j=await r.json();const c=j&&j.status&&j.status.http_code;return{ok:!!(c>=200&&c<500),ms:ms()};}catch{return{ok:false,ms:ms()};}
+}
+async function deepCheck(raw,onPartial){
   const key=String(raw).slice(0,200);
   if(S.deepCache.has(key))return S.deepCache.get(key);
   let host="";try{host=new URL(/^https?:\/\//i.test(raw)?raw:"https://"+raw).hostname.toLowerCase();}catch{host=raw;}
-  const [dns,rd,rc]=await Promise.all([dohGoogle(host),rdap(host),reach(/^https?:\/\//i.test(raw)?raw:"https://"+raw)]);
-  const dead=(dns.nx||dns.n===0||rd.ok===false)&&rc.ok===false;
-  const res={dns,rd,rc,dead};
+  const full=/^https?:\/\//i.test(raw)?raw:"https://"+raw;
+  const rp=registrableDomain(host);
+  const mark=(k,v)=>{try{onPartial&&onPartial(k,v,host,rp);}catch{}};
+  const p1=dohGoogle(host).then(r=>(mark("dns",r),r));
+  const p2=rdap(rp).then(r=>(mark("rd",r),r));
+  const p3=reach(full).then(r=>(mark("rc",r),r));
+  const [dns,rd,rc]=await Promise.all([p1,p2,p3]);
+  const dnsAlive=dns.ok===true&&dns.n>0;
+  const dnsGone=dns.nx===true||dns.n===0;
+  const regGone=rd.ok===false;
+  // "does not exist" needs a real negative signal — an unreachable proxy is not proof.
+  const dead=rc.ok===false&&!dnsAlive&&(dnsGone||regGone);
+  const res={dns,rd,rc,dead,host,rp};
   S.deepCache.set(key,res);return res;
 }
 function fuse(instant,deep,msTotal){
@@ -296,13 +320,16 @@ function fuse(instant,deep,msTotal){
   else if(deep.dns.nx||deep.dns.ok===false){ev.push("🔌 <b>Live DNS:</b> no records — domain does not resolve");chips.push(["🌐","#FF4D6D","DNS dead"]);}
   else{ev.push("➖ <b>Live DNS:</b> unreachable");chips.push(["🌐","#9A94A6","DNS ?"]);}
   if(deep.rd.ok===true&&deep.rd.age!=null){const a=deep.rd.age;ev.push((a<1?"⚠️":"✅")+" <b>Domain age:</b> "+(a<1/12?Math.round(a*365)+" days — brand-new, high risk":a<1?(a*12).toFixed(1)+" months — very young":a.toFixed(1)+" year(s)"));chips.push(["📅",a<1?"#FF4D6D":"#00E5A0",a<1?"new":"aged"]);if(a<0.5)score+=18;else if(a<1)score+=10;}
-  else if(deep.rd.ok===false){ev.push("🔌 <b>Registry:</b> not registered — this domain does not exist");chips.push(["📅","#FF4D6D","unregistered"]);}
+  else if(deep.rd.ok===false){
+    if(deep.dns.ok===true&&deep.dns.n>0){ev.push("➖ <b>Registry:</b> no registry record for this exact host (it is a subdomain of "+(deep.rp||"?")+") — parent domain exists");chips.push(["📅","#FFB020","subdomain"]);}
+    else{ev.push("🔌 <b>Registry:</b> not registered — this domain does not exist");chips.push(["📅","#FF4D6D","unregistered"]);}
+  }
   else{ev.push("➖ <b>Registry:</b> unreachable");chips.push(["📅","#9A94A6","age ?"]);}
   if(deep.rc.ok===true){ev.push("✅ <b>Reachability:</b> server answers (page loads, ~"+deep.rc.ms+"ms)");chips.push(["📡","#00E5A0","loads"]);}
   else{ev.push("🔌 <b>Reachability:</b> server does not answer — link is not working");chips.push(["📡","#FF4D6D","down"]);}
   for(const h of instant.hits.slice(0,6))ev.push("• "+h);
   score=Math.min(100,Math.round(score));
-  if(deep.dead){return{verdict:"dead",score:100,title:"🔌 DEAD — DOES NOT EXIST",why:"This link/URL <b>does not work</b>. DNS + registry + server all say it is missing or offline. Do not pay, share OTPs, or retry on lookalike domains.<br><br>"+ev.join("<br>"),chips,sources:"instant + DNS + registry + reachability ("+(msTotal/1000).toFixed(1)+"s)"};}
+  if(deep.dead){const proofs=[];if(deep.dns.nx||deep.dns.n===0)proofs.push("DNS has no records");if(deep.rd.ok===false)proofs.push("registry has no such domain");if(deep.rc.ok===false)proofs.push("server does not answer");return{verdict:"dead",score:100,title:"🔌 DEAD — DOES NOT EXIST",why:"This link/URL <b>does not work</b>. "+proofs.join(" + ")+". Do not pay, share OTPs, or retry on lookalike domains.<br><br>"+ev.join("<br>"),chips,sources:"instant + DNS + registry + reachability ("+(msTotal/1000).toFixed(1)+"s)"};}
   const v=score>=60?"scam":score>20?"suspicious":"safe";
   return{verdict:v,score,title:v==="scam"?"⛔ SCAM — DO NOT ENTER":v==="suspicious"?"⚠️ SUSPICIOUS — BE CAREFUL":"✅ SAFE — LOOKS GENUINE",
     why:(v==="scam"?"DANGER: do NOT open, pay, scan or share codes. Delete it from chat.<br><br>":v==="suspicious"?"NOT SAFE. Warning signs found — open the official app directly instead.<br><br>":"Looks genuine: no lure or impersonation signals. Still never share OTPs.<br><br>")+ev.join("<br>"),chips,sources:"instant + DNS + age + reachability ("+(msTotal/1000).toFixed(1)+"s)"};
@@ -323,7 +350,14 @@ async function check(raw,origin){
   $("scanpop").style.display="flex";$("scanurl").textContent=target;$("scantime").textContent="…";
   const t0=performance.now();
   S.scanAbort={cancelled:false};$("scancel").onclick=()=>{S.scanAbort.cancelled=true;$("scanpop").style.display="none";};
-  let deep=null;try{deep=await deepCheck(target);}catch{deep={dns:{ok:null},rd:{ok:null},rc:{ok:false},dead:false};}
+  const onPartial=(k,r)=>{try{
+    const t=k==="dns"?(r.ok?("DNS ✓ "+r.n+" rec"):(r.nx||r.n===0?"DNS ✗ gone":"DNS ?")):
+           k==="rd"?(r.ok?(r.age!=null?(r.age<1?"new site":"age "+r.age.toFixed(0)+"y"):"registry ✓"):"registry ✗ 404"):
+           (r.ok?"server ✓ "+r.ms+"ms":"server ✗");
+    $("fpsrc").textContent="live: "+t+" • confirming…";
+    $("lgtiming").textContent="live: "+t;
+  }catch{}};
+  let deep=null;try{deep=await deepCheck(target,onPartial);}catch{deep={dns:{ok:null},rd:{ok:null},rc:{ok:false},dead:false};}
   if(my!==seq||S.scanAbort.cancelled)return;
   const msTotal=Math.round(performance.now()-t0);
   const f=fuse(instant,deep,msTotal);
