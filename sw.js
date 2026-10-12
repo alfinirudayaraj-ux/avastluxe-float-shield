@@ -1,5 +1,5 @@
 /* Float Shield background worker — keeps verdicts alive when tab is minimized */
-const CACHE = "float-shield-v3";
+const CACHE = "float-shield-v4";
 const ASSETS = ["./", "./index.html", "./shield-engine.js", "./manifest.webmanifest", "./icon.svg"];
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS).catch(() => {})).then(() => self.skipWaiting()));

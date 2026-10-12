@@ -308,8 +308,8 @@ async function deepCheck(raw,onPartial){
   const dnsAlive=dns.ok===true&&dns.n>0;
   const dnsGone=dns.nx===true||dns.n===0;
   const regGone=rd.ok===false;
-  // "does not exist" needs a real negative signal — an unreachable proxy is not proof.
-  const dead=rc.ok===false&&!dnsAlive&&(dnsGone||regGone);
+  // DNS NXDOMAIN / unregistered = the link cannot work, whatever a proxy probe claims.
+  const dead=!dnsAlive&&(dnsGone||regGone);
   const res={dns,rd,rc,dead,host,rp};
   S.deepCache.set(key,res);return res;
 }
@@ -325,7 +325,11 @@ function fuse(instant,deep,msTotal){
     else{ev.push("🔌 <b>Registry:</b> not registered — this domain does not exist");chips.push(["📅","#FF4D6D","unregistered"]);}
   }
   else{ev.push("➖ <b>Registry:</b> unreachable");chips.push(["📅","#9A94A6","age ?"]);}
-  if(deep.rc.ok===true){ev.push("✅ <b>Reachability:</b> server answers (page loads, ~"+deep.rc.ms+"ms)");chips.push(["📡","#00E5A0","loads"]);}
+  const dnsGoneHere=deep.dns.ok===false&&(deep.dns.nx||deep.dns.n===0);
+  if(deep.rc.ok===true){
+    if(dnsGoneHere){ev.push("🔌 <b>Reachability:</b> probe answered, but DNS has no records for this host — a proxy/error page is answering. The link still cannot open.");chips.push(["📡","#FF4D6D","probe fake"]);}
+    else{ev.push("✅ <b>Reachability:</b> server answers (page loads, ~"+deep.rc.ms+"ms)");chips.push(["📡","#00E5A0","loads"]);}
+  }
   else{ev.push("🔌 <b>Reachability:</b> server does not answer — link is not working");chips.push(["📡","#FF4D6D","down"]);}
   for(const h of instant.hits.slice(0,6))ev.push("• "+h);
   score=Math.min(100,Math.round(score));
