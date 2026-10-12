@@ -290,8 +290,9 @@ function registrableDomain(host){
 }
 async function reach(url){
   const t0=performance.now(),ms=()=>Math.round(performance.now()-t0);
-  // fast direct probe first (opaque response = server answered)
-  try{await timeout(fetch(url,{mode:"no-cors"}),3500);return{ok:true,ms:ms()};}catch{}
+  // https page cannot probe http:// directly (mixed content) — go straight to proxy
+  const canDirect=!(location.protocol==="https:"&&/^http:\/\//i.test(url));
+  if(canDirect){try{await timeout(fetch(url,{mode:"no-cors"}),3500);return{ok:true,ms:ms()};}catch{}}
   try{const r=await timeout(fetch("https://api.allorigins.win/get?url="+encodeURIComponent(url)),5000);const j=await r.json();const c=j&&j.status&&j.status.http_code;return{ok:!!(c>=200&&c<500),ms:ms()};}catch{return{ok:false,ms:ms()};}
 }
 async function deepCheck(raw,onPartial){
