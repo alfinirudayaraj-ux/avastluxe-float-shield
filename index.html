@@ -292,10 +292,10 @@ async function reach(url){
   const t0=performance.now(),ms=()=>Math.round(performance.now()-t0);
   // https page cannot probe http:// directly (mixed content) — go straight to proxy
   const canDirect=!(location.protocol==="https:"&&/^http:\/\//i.test(url));
-  if(canDirect){try{await timeout(fetch(url,{mode:"no-cors"}),3500);return{ok:true,ms:ms()};}catch{}}
-  try{const r=await timeout(fetch("https://api.allorigins.win/get?url="+encodeURIComponent(url)),5000);const j=await r.json();const c=j&&j.status&&j.status.http_code;return{ok:!!(c>=200&&c<500),ms:ms()};}catch{return{ok:false,ms:ms()};}
+  if(canDirect){try{await timeout(fetch(url,{mode:"no-cors"}),3000);return{ok:true,ms:ms()};}catch{}}
+  try{const r=await timeout(fetch("https://api.allorigins.win/get?url="+encodeURIComponent(url)),4500);const j=await r.json();const c=j&&j.status&&j.status.http_code;return{ok:!!(c>=200&&c<500),ms:ms()};}catch{return{ok:false,ms:ms()};}
 }
-async function deepCheck(raw,onPartial){
+async function deepCheck(raw,onPartial,onEarly){
   const key=String(raw).slice(0,200);
   if(S.deepCache.has(key))return S.deepCache.get(key);
   let host="";try{host=new URL(/^https?:\/\//i.test(raw)?raw:"https://"+raw).hostname.toLowerCase();}catch{host=raw;}
@@ -305,6 +305,8 @@ async function deepCheck(raw,onPartial){
   const p1=dohGoogle(host).then(r=>(mark("dns",r),r));
   const p2=rdap(rp).then(r=>(mark("rd",r),r));
   const p3=reach(full).then(r=>(mark("rc",r),r));
+  // Paint DNS + domain age as soon as they settle — don't wait for the slow probe.
+  Promise.all([p1,p2]).then(([d,r])=>{try{onEarly&&onEarly({dns:d,rd:r,rc:null,dead:false,host,rp});}catch{}}).catch(()=>{});
   const [dns,rd,rc]=await Promise.all([p1,p2,p3]);
   const dnsAlive=dns.ok===true&&dns.n>0;
   const dnsGone=dns.nx===true||dns.n===0;
@@ -327,17 +329,19 @@ function fuse(instant,deep,msTotal){
   }
   else{ev.push("➖ <b>Registry:</b> unreachable");chips.push(["📅","#9A94A6","age ?"]);}
   const dnsGoneHere=deep.dns.ok===false&&(deep.dns.nx||deep.dns.n===0);
-  if(deep.rc.ok===true){
+  if(deep.rc===null){ev.push("⏳ <b>Reachability:</b> checking if the server answers…");chips.push(["📡","#F6E27A","checking"]);}
+  else if(deep.rc.ok===true){
     if(dnsGoneHere){ev.push("🔌 <b>Reachability:</b> probe answered, but DNS has no records for this host — a proxy/error page is answering. The link still cannot open.");chips.push(["📡","#FF4D6D","probe fake"]);}
     else{ev.push("✅ <b>Reachability:</b> server answers (page loads, ~"+deep.rc.ms+"ms)");chips.push(["📡","#00E5A0","loads"]);}
   }
   else{ev.push("🔌 <b>Reachability:</b> server does not answer — link is not working");chips.push(["📡","#FF4D6D","down"]);}
   for(const h of instant.hits.slice(0,6))ev.push("• "+h);
   score=Math.min(100,Math.round(score));
-  if(deep.dead){const proofs=[];if(deep.dns.nx||deep.dns.n===0)proofs.push("DNS has no records");if(deep.rd.ok===false)proofs.push("registry has no such domain");if(deep.rc.ok===false)proofs.push("server does not answer");return{verdict:"dead",score:100,title:"🔌 DEAD — DOES NOT EXIST",why:"This link/URL <b>does not work</b>. "+proofs.join(" + ")+". Do not pay, share OTPs, or retry on lookalike domains.<br><br>"+ev.join("<br>"),chips,sources:"instant + DNS + registry + reachability ("+(msTotal/1000).toFixed(1)+"s)"};}
+  if(deep.dead){const proofs=[];if(deep.dns.nx||deep.dns.n===0)proofs.push("DNS has no records");if(deep.rd.ok===false)proofs.push("registry has no such domain");if(deep.rc&&deep.rc.ok===false)proofs.push("server does not answer");if(!proofs.length)proofs.push("DNS + registry negatives");return{verdict:"dead",score:100,title:"🔌 DEAD — DOES NOT EXIST",why:"This link/URL <b>does not work</b>. "+proofs.join(" + ")+". Do not pay, share OTPs, or retry on lookalike domains.<br><br>"+ev.join("<br>"),chips,sources:deep.rc===null?"instant + DNS + registry ("+(msTotal/1000).toFixed(1)+"s, reachability running…)":"instant + DNS + registry + reachability ("+(msTotal/1000).toFixed(1)+"s)"};}
   const v=score>=60?"scam":score>20?"suspicious":"safe";
+  const srcLabel=deep.rc===null?"instant + DNS + age ("+(msTotal/1000).toFixed(1)+"s, reachability running…)":"instant + DNS + age + reachability ("+(msTotal/1000).toFixed(1)+"s)";
   return{verdict:v,score,title:v==="scam"?"⛔ SCAM — DO NOT ENTER":v==="suspicious"?"⚠️ SUSPICIOUS — BE CAREFUL":"✅ SAFE — LOOKS GENUINE",
-    why:(v==="scam"?"DANGER: do NOT open, pay, scan or share codes. Delete it from chat.<br><br>":v==="suspicious"?"NOT SAFE. Warning signs found — open the official app directly instead.<br><br>":"Looks genuine: no lure or impersonation signals. Still never share OTPs.<br><br>")+ev.join("<br>"),chips,sources:"instant + DNS + age + reachability ("+(msTotal/1000).toFixed(1)+"s)"};
+    why:(v==="scam"?"DANGER: do NOT open, pay, scan or share codes. Delete it from chat.<br><br>":v==="suspicious"?"NOT SAFE. Warning signs found — open the official app directly instead.<br><br>":"Looks genuine: no lure or impersonation signals. Still never share OTPs.<br><br>")+ev.join("<br>"),chips,sources:srcLabel};
 }
 // ---------- main check pipeline: instant (<0.1s) then deep ----------
 let seq=0;
@@ -363,7 +367,20 @@ async function check(raw,origin){
     $("fpsrc").textContent="live: "+t+" • confirming…";
     $("lgtiming").textContent="live: "+t;
   }catch{}};
-  let deep=null;try{deep=await deepCheck(target,onPartial);}catch{deep={dns:{ok:null},rd:{ok:null},rc:{ok:false},dead:false};}
+  // DNS + registry settle first (~0.5s): paint immediately, reachability may lag.
+  const onEarly=(d)=>{
+    if(my!==seq||S.scanAbort.cancelled)return;
+    try{
+      const msNow=Math.round(performance.now()-t0);
+      const dnsAliveE=d.dns.ok===true&&d.dns.n>0;
+      d.dead=!dnsAliveE&&((d.dns.nx===true||d.dns.n===0)||d.rd.ok===false);
+      const p=fuse(instant,d,msNow);
+      paintFloat({...p,host:instant.host||target.slice(0,60),ms:"instant "+instMs+"ms + DNS/age "+(msNow/1000).toFixed(1)+"s",origin,count:S.scamCount});
+      $("lgtiming").textContent=p.sources;
+      slog("["+origin+"] "+(instant.host||target.slice(0,50))+" — <b>"+p.title+" (DNS + age "+(msNow/1000).toFixed(1)+"s)</b>");
+    }catch{}
+  };
+  let deep=null;try{deep=await deepCheck(target,onPartial,onEarly);}catch{deep={dns:{ok:null},rd:{ok:null},rc:{ok:false},dead:false};}
   if(my!==seq||S.scanAbort.cancelled)return;
   const msTotal=Math.round(performance.now()-t0);
   const f=fuse(instant,deep,msTotal);
