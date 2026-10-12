@@ -6,6 +6,9 @@ const cases = [
   ["https://www.google.com", "safe"],
   ["http://hdfc-netbanking-secure.top/login", "scam"],
   ["https://www.icicibank.com", "safe"],
+  ["https://paypalsecurity.com/login", "scam"],
+  ["https://whatsapp-gift-claim-verify.top/free", "scam"],
+  ["https://www.whatsapp.com", "safe"],
   ["https://this-link-definitely-does-not-exist-xyz12345.com/login", null], // dead decided by live DNS, instant may say suspicious/scam
 ];
 let fail = 0;

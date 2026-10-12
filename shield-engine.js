@@ -5,7 +5,7 @@ const URL_RULES = [
   { re: /https?:\/\/[^\s]*@/i, w: 30, label: "'@' trick — browser ignores everything before @" },
   { re: /[а-яё]|xn--/i, w: 30, label: "Lookalike domain (IDN/punycode homoglyph)" },
   { re: /(hdfc|sbi|icici|axis|paytm|phonepe|amazon|flipkart|apple|microsoft|netflix|paypal|whatsapp|instagram|facebook|google)[-_.]?[a-z0-9]*\.(xyz|top|shop|click|loan|tk|ml|ga|gq|cf|buzz|store|online|sbs|site|live)/i, w: 35, label: "Famous brand on a suspicious cheap domain" },
-  { re: /[a-z0-9-]*(login|secure|verify|update|banking|wallet|alert|kyc|support)[a-z0-9-]*\.[a-z]{2,}/i, w: 22, label: "Domain imitates a login/security page" },
+  { re: /(login|secure|security|verify|update|banking|wallet|alert|kyc|support|account|auth|confirm|netbank|portal|signin|password|otp)[a-z0-9-]*\.[a-z]{2,}/i, w: 22, label: "Domain imitates a login/security page" },
   { re: /https?:\/\/(?!(www\.)?(google|youtube|github|microsoft|apple|amazon)\.com)[\w-]+\.(xyz|top|click|shop|tk|ml|ga|gq|cf|buzz|loan)/i, w: 32, label: "High-risk TLD (xyz/top/click/tk…)" },
 ];
 const MSG_RULES = [
@@ -47,6 +47,14 @@ const BRANDS = [
   { pat: /(^|[^a-z])jio([^a-z]|$)/i, name: "Jio", official: ["jio.com"] },
   { pat: /airtel/i, name: "Airtel", official: ["airtel.in"] },
   { pat: /(^|[^a-z])dhl([^a-z]|$)/i, name: "DHL", official: ["dhl.com"] },
+  { pat: /whatsapp/i, name: "WhatsApp", official: ["whatsapp.com","whatsapp.net"] },
+  { pat: /google/i, name: "Google", official: ["google.com","google.co.in","googleapis.com"] },
+  { pat: /youtube|youtu\.be/i, name: "YouTube", official: ["youtube.com","youtu.be"] },
+  { pat: /swiggy/i, name: "Swiggy", official: ["swiggy.com"] },
+  { pat: /zomato/i, name: "Zomato", official: ["zomato.com"] },
+  { pat: /(^|[^a-z])uber([^a-z]|$)/i, name: "Uber", official: ["uber.com"] },
+  { pat: /(^|[^a-z])ola([^a-z]|$)|olacabs/i, name: "Ola", official: ["olacabs.com"] },
+  { pat: /linkedin/i, name: "LinkedIn", official: ["linkedin.com"] },
 ];
 const RISKY_TLDS = /^(io|xyz|top|tk|ml|ga|gq|cf|buzz|sbs|loan|click|shop|store|online|site|live|vip|rest)$/;
 const OFFICIALS = [...new Set(TRUSTED.concat(BRANDS.flatMap(b => b.official)))];
@@ -92,7 +100,7 @@ function instantAnalyze(input) {
   for (const r of (isUrl ? URL_RULES.concat(MSG_RULES) : MSG_RULES)) {
     if (r.re.test(t)) { score += r.w; hits.push(r.label); }
   }
-  let trusted = false, host = "";
+  let trusted = false, host = "", impersonated = false;
   try {
     const first = (t.match(/https?:\/\/[^\s"'<>]+/i) || [t.split(/\s/)[0]])[0];
     const u = new URL(/^https?:\/\//i.test(first) ? first : "https://" + first);
@@ -104,6 +112,7 @@ function instantAnalyze(input) {
     if (/whatsapp/i.test(t) && !host.endsWith("whatsapp.com") && !host.endsWith("whatsapp.net")) { score += 28; hits.push("Impersonates WhatsApp on a foreign domain"); }
     const bc = brandCheck(host, u.pathname || "");
     if (bc && !bc.home) {
+      impersonated = true;
       score += 40; hits.push("Uses " + bc.b.name + "'s name but is NOT " + bc.b.official[0] + " — the real " + bc.b.name + " never operates from here");
       const tld = (host.split(".").pop() || "");
       if (RISKY_TLDS.test(tld)) { score += 15; hits.push("Bank/brand lure parked on risky suffix (." + tld + ")"); }
@@ -129,6 +138,15 @@ function instantAnalyze(input) {
     if (eb && !eb.home) { score += 40; hits.push("Links to " + eb.b.name + " impostor " + uh + " — real home: " + eb.b.official.join(", ")); }
   }
   if (trusted) score = Math.max(0, score - 60);
+  // Famous brand claimed on a non-official domain + scam context = SCAM, not "maybe".
+  if (impersonated) {
+    const tld = (host.split(".").pop() || "");
+    const riskyCtx = RISKY_TLDS.test(tld)
+      || /(login|secure|security|verify|update|banking|wallet|alert|kyc|support|account|auth|confirm|netbank|portal|signin|password|otp)/i.test(host)
+      || (host.match(/-/g) || []).length >= 2
+      || /(login|verify|account|secure|update|kyc|bank|otp|password)([-_.\/?&]|$)/i.test(t);
+    if (riskyCtx && score < 60) { score = 60; hits.push("Brand impersonation + scam context — auto-classified SCAM"); }
+  }
   score = Math.min(100, Math.round(score));
   const t1 = (typeof performance !== "undefined" ? performance.now() : Date.now());
   return { score, verdict: score >= 60 ? "scam" : score > 20 ? "suspicious" : "safe", hits: [...new Set(hits)], trusted, host, kind: isUrl ? "url" : "message", ms: Math.round((t1 - t0) * 10) / 10 };

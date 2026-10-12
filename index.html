@@ -351,6 +351,7 @@ async function check(raw,origin){
   // instant paint — this is the "very very fast" answer
   paintFloat({verdict:instant.verdict==="safe"?"safe":instant.verdict==="suspicious"?"suspicious":"scam",score:instant.score,host:instant.host||target.slice(0,60),ms:"instant "+instMs+"ms",sources:"instant engine • live checking…",why:"<b>Instant verdict ("+instMs+"ms):</b> "+(instant.verdict==="scam"?"⛔ looks like a scam — deep live check running…":instant.verdict==="suspicious"?"⚠️ warning signs — deep live check running…":"✅ looks clean so far — confirming live…")+"<br>• "+(instant.hits[0]||"no lure pattern yet"),chips:[["⚡","#F6E27A","instant"]],title:instant.verdict==="scam"?"⛔ SCAM? (instant)":instant.verdict==="suspicious"?"⚠️ CHECKING… (instant)":"✅ LIKELY SAFE (instant)",origin,count:S.scamCount});
   setHero(instant,"live…");
+  if(/clipboard|typing|tap|screen|message/i.test(origin)) slog("["+origin+"] "+(instant.host||String(raw).slice(0,50))+" — instant <b>"+instant.verdict.toUpperCase()+" in "+instant.ms+"ms</b>");
   $("scanpop").style.display="flex";$("scanurl").textContent=target;$("scantime").textContent="…";
   const t0=performance.now();
   S.scanAbort={cancelled:false};$("scancel").onclick=()=>{S.scanAbort.cancelled=true;$("scanpop").style.display="none";};
@@ -371,7 +372,8 @@ async function check(raw,origin){
   FP.dataset.url=target;FP.dataset.verdict=f.verdict;FP.dataset.safe=f.verdict==="safe"?"1":"";
   // main UI
   const line=f.verdict==="dead"?"🔌 DEAD LINK — DOES NOT EXIST":f.verdict==="scam"?"⛔ NOT SAFE — DO NOT ENTER":f.verdict==="suspicious"?"⚠️ SUSPICIOUS — BE CAREFUL":"✅ SAFE — LOOKS GENUINE";
-  if(instant.kind==="message"||!instant.host){$("mvline").textContent=line+" • "+(msTotal/1000).toFixed(1)+"s";$("mreasons").innerHTML=f.why;}
+  const fromMsg=/msg|message/i.test(origin);
+  if(fromMsg||(!instant.host&&instant.kind==="message")){$("mvline").textContent=line+" • "+(msTotal/1000).toFixed(1)+"s";$("mreasons").innerHTML=f.why;}
   $("vline").textContent=line+" • "+(msTotal/1000).toFixed(1)+"s";$("reasons").innerHTML="Host: "+(instant.host||"(message)")+"<br>"+f.why;
   setHero({score:f.score,verdict:f.verdict},"");
   slog("["+origin+"] "+target.slice(0,70),line+" • instant "+instMs+"ms + live "+(msTotal/1000).toFixed(1)+"s");
