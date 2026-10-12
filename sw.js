@@ -1,5 +1,5 @@
 /* Float Shield background worker — keeps verdicts alive when tab is minimized */
-const CACHE = "float-shield-v4";
+const CACHE = "float-shield-v5";
 const ASSETS = ["./", "./index.html", "./shield-engine.js", "./manifest.webmanifest", "./icon.svg"];
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS).catch(() => {})).then(() => self.skipWaiting()));
@@ -7,11 +7,12 @@ self.addEventListener("install", (e) => {
 self.addEventListener("activate", (e) => {
   e.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim()));
 });
-// Network-first: an updated shield must never be masked by a stale cache.
+// Network-first WITH revalidation: an updated shield must never be masked by
+// HTTP cache (GitHub Pages serves max-age=600, which hid engine fixes for 10 min).
 self.addEventListener("fetch", (e) => {
   if (e.request.method !== "GET") return;
   e.respondWith(
-    fetch(e.request).then((r) => {
+    fetch(e.request, { cache: "no-cache" }).then((r) => {
       const copy = r.clone();
       caches.open(CACHE).then((c) => c.put(e.request, copy).catch(() => {}));
       return r;
