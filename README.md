@@ -1,5 +1,10 @@
 # AvastLuxe Float Shield v2 — NEW app (original `avastluxe-shield.surge.sh` untouched)
 
+## 🔴 LIVE LINK (open this)
+**https://alfinirudayaraj-ux.github.io/avastluxe-float-shield/**
+
+Repo: https://github.com/alfinirudayaraj-ux/avastluxe-float-shield
+
 Real-time guard with 1-second watchers + premium floating tab + OS-level PiP float + dead-link detection.
 
 ## What it does (real life, real time)
@@ -14,27 +19,27 @@ Real-time guard with 1-second watchers + premium floating tab + OS-level PiP flo
 A pure website **cannot** draw over all Android apps or scan the whole OS without a native shell — browsers block that for security. This app ships the closest web-legal stack:
 1. In-app float (always on top here) 2. PiP float (OS-level, above other apps) 3. Background notifications. For a Play-Store overlay over every app, see step 4.
 
-## Run locally
-```bash
+## Run locally (if you want localhost)
+Open **PowerShell** and run all three lines, then open the URL:
+```powershell
 cd D:\avastluxe-float-shield
 python -m http.server 8000
-# open http://localhost:8000
+# then in your browser open:  http://localhost:8000/
+```
+Troubleshooting: the folder must be opened (not `file://`), the server window must stay open, and if port 8000 is busy use `python -m http.server 8099` → `http://localhost:8099/`. Notifications/PiP/clipboard need `http://localhost` or `https://` — `file://` blocks them, which is why the live https link above is easiest.
+
+## Push updates (already set up)
+```bash
+cd D:\avastluxe-float-shield
+git add -A && git commit -m "update" && git push
+# GitHub Pages auto-redeploys in ~30-60s at the link above.
 ```
 
-## Host as NEW surge URL (does not touch old app)
+## Host as a NEW surge URL (optional — needs your Surge login)
 ```bash
 npm i -g surge
 cd D:\avastluxe-float-shield
 surge . avastluxe-float-shield.surge.sh
-```
-
-## New GitHub repo
-```bash
-cd D:\avastluxe-float-shield
-git init -b main
-git add .
-git commit -m "Float Shield v2: 1s watch + floating tab + PiP + dead-link detection"
-gh repo create avastluxe-float-shield --public --source=. --push
 ```
 
 ## Step 4 — true system-wide overlay (optional native wrapper)
